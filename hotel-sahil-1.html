@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Hotel Sahil — Billing</title>
+
+<!-- Makes it behave like an installed app when added to the home screen -->
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Hotel Sahil" />
+<meta name="theme-color" content="#8B2E1F" />
+
+<link rel="manifest" href="data:application/manifest+json,{%22name%22:%22Hotel%20Sahil%20Billing%22,%22short_name%22:%22Hotel%20Sahil%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22,%22background_color%22:%22%23FFF7EC%22,%22theme_color%22:%22%238B2E1F%22,%22icons%22:[{%22src%22:%22data:image/svg%2Bxml,%253Csvg%2Bxmlns%253D%2527http://www.w3.org/2000/svg%2527%2Bviewbox%253D%25270%25200%2520100%2520100%2527%253E%253Crect%2520width%253D%2527100%2527%2520height%253D%2527100%2527%2520fill%253D%2527%25238B2E1F%2527/%253E%253Ctext%2520x%253D%252750%2527%2520y%253D%252765%2527%2520font-size%253D%252755%2527%2520fill%253D%2527%2523fff%2527%2520text-anchor%253D%2527middle%2527%2520font-family%253D%2527sans-serif%2527%253EHS%253C/text%253E%253C/svg%253E%22,%22sizes%22:%22any%22,%22type%22:%22image/svg%2Bxml%22}]}" />
+
+<!-- React + Babel (no build step needed) -->
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet" />
+
+<style>
+  html, body, #root { height: 100%; margin: 0; }
+  body { -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!--
+  This localStorage-backed shim gives window.storage the same
+  get/set/list/delete interface the app expects, so the component
+  code below did not need to change. Data is saved on THIS phone/
+  browser only (per-device, not shared across devices).
+-->
+<script>
+  window.storage = {
+    async get(key) {
+      const raw = localStorage.getItem(key);
+      if (raw === null) throw new Error("not found");
+      return { key, value: raw };
+    },
+    async set(key, value) {
+      localStorage.setItem(key, value);
+      return { key, value };
+    },
+    async delete(key) {
+      const existed = localStorage.getItem(key) !== null;
+      localStorage.removeItem(key);
+      return { key, deleted: existed };
+    },
+    async list(prefix) {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!prefix || k.startsWith(prefix)) keys.push(k);
+      }
+      return { keys, prefix };
+    },
+  };
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef } = React;
+
+// null price = APS (as per size) — staff enters price on first add
+const MENU = [
+  // SOUPS
+  { id: "sp1", cat: "Soups", name: "Chicken Manchow Soup", price: 130 },
+  { id: "sp2", cat: "Soups", name: "Chicken Hot & Sour Soup", price: 140 },
+  { id: "sp3", cat: "Soups", name: "Chicken Clear Soup", price: 110 },
+  { id: "sp4", cat: "Soups", name: "Chicken Sweet Corn Soup", price: 170 },
+  { id: "sp5", cat: "Soups", name: "Lung Fung Soup", price: 170 },
+  { id: "sp6", cat: "Soups", name: "Cream of Mushroom Soup", price: 160 },
+  { id: "sp7", cat: "Soups", name: "Noodles Soup", price: 150 },
+  { id: "sp8", cat: "Soups", name: "Veg Manchow Soup", price: 120 },
+  { id: "sp9", cat: "Soups", name: "Veg Hot & Sour Soup", price: 120 },
+  { id: "sp10", cat: "Soups", name: "Tomato Soup", price: 140 },
+  { id: "sp11", cat: "Soups", name: "Veg Sweet Corn Soup", price: 160 },
+
+  // STARTERS
+  { id: "st1", cat: "Starters", name: "Chicken Lollypop (Half)", price: 130 },
+  { id: "st2", cat: "Starters", name: "Chicken Lollypop (Full)", price: 240 },
+  { id: "st3", cat: "Starters", name: "Chicken Spring Roll", price: 250 },
+  { id: "st4", cat: "Starters", name: "Chicken Crispy", price: 250 },
+  { id: "st5", cat: "Starters", name: "Chicken Satte", price: 270 },
+  { id: "st6", cat: "Starters", name: "Chicken Lollypop Schezwan (Dry)", price: 260 },
+  { id: "st7", cat: "Starters", name: "Chicken Lollypop Schezwan (Gravy)", price: 280 },
+  { id: "st8", cat: "Starters", name: "Veg Lollypop", price: 160 },
+  { id: "st9", cat: "Starters", name: "Veg Spring Roll", price: 190 },
+  { id: "st10", cat: "Starters", name: "Veg Crispy", price: 170 },
+  { id: "st11", cat: "Starters", name: "Paneer Crispy", price: 190 },
+  { id: "st12", cat: "Starters", name: "Paneer Sate", price: 220 },
+
+  // VEG CURRIES
+  { id: "vc1", cat: "Veg Curries", name: "Dal Fry", price: 120 },
+  { id: "vc2", cat: "Veg Curries", name: "Dal Tadka", price: 140 },
+  { id: "vc3", cat: "Veg Curries", name: "Aloo Mutter", price: 150 },
+  { id: "vc4", cat: "Veg Curries", name: "Aloo Gobi", price: 150 },
+  { id: "vc5", cat: "Veg Curries", name: "Aloo Palak", price: 140 },
+  { id: "vc6", cat: "Veg Curries", name: "Mix Veg", price: 160 },
+  { id: "vc7", cat: "Veg Curries", name: "Veg Kolhapuri", price: 180 },
+  { id: "vc8", cat: "Veg Curries", name: "Veg Hydrabadi", price: 190 },
+  { id: "vc9", cat: "Veg Curries", name: "Mushroom Masala", price: 190 },
+  { id: "vc10", cat: "Veg Curries", name: "Palak Paneer", price: 190 },
+  { id: "vc11", cat: "Veg Curries", name: "Veg Kadai", price: 200 },
+  { id: "vc12", cat: "Veg Curries", name: "Veg Handi", price: 220 },
+  { id: "vc13", cat: "Veg Curries", name: "Paneer Mutter", price: 180 },
+  { id: "vc14", cat: "Veg Curries", name: "Paneer Makhanwala", price: 200 },
+  { id: "vc15", cat: "Veg Curries", name: "Paneer Tikka Masala", price: 240 },
+  { id: "vc16", cat: "Veg Curries", name: "Paneer Bhurjee", price: 180 },
+  { id: "vc17", cat: "Veg Curries", name: "Paneer Kadai", price: 210 },
+  { id: "vc18", cat: "Veg Curries", name: "Paneer Handi", price: 220 },
+  { id: "vc19", cat: "Veg Curries", name: "Veg Raita", price: 110 },
+  { id: "vc20", cat: "Veg Curries", name: "Green Salad", price: 100 },
+  { id: "vc21", cat: "Veg Curries", name: "Aloo Jeera", price: 120 },
+  { id: "vc22", cat: "Veg Curries", name: "Bhendi Masala Fry", price: 160 },
+  { id: "vc23", cat: "Veg Curries", name: "Baigan Bharta", price: 150 },
+  { id: "vc24", cat: "Veg Curries", name: "Chana Masala", price: 150 },
+  { id: "vc25", cat: "Veg Curries", name: "Dal Makhani", price: 160 },
+  { id: "vc26", cat: "Veg Curries", name: "Paneer Kasturi", price: 220 },
+  { id: "vc27", cat: "Veg Curries", name: "Paneer Punjabi", price: 220 },
+  { id: "vc28", cat: "Veg Curries", name: "Paneer Lasuni", price: 200 },
+  { id: "vc29", cat: "Veg Curries", name: "Veg Cinguri", price: 220 },
+  { id: "vc30", cat: "Veg Curries", name: "Veg Jaypuri", price: 220 },
+  { id: "vc31", cat: "Veg Curries", name: "Dum Aloo Punjabi", price: 240 },
+  { id: "vc32", cat: "Veg Curries", name: "Veg Maratha", price: 200 },
+  { id: "vc33", cat: "Veg Curries", name: "Veg Patiyala", price: 240 },
+  { id: "vc34", cat: "Veg Curries", name: "Veg Kofta", price: 240 },
+  { id: "vc35", cat: "Veg Curries", name: "Paneer Kofta", price: 250 },
+  { id: "vc36", cat: "Veg Curries", name: "Malai Kofta", price: 290 },
+  { id: "vc37", cat: "Veg Curries", name: "Kaju Masala", price: 260 },
+  { id: "vc38", cat: "Veg Curries", name: "Kaju Paneer Masala", price: 260 },
+  { id: "vc39", cat: "Veg Curries", name: "Paneer Lahori", price: 250 },
+  { id: "vc40", cat: "Veg Curries", name: "Paneer Pasandita", price: 280 },
+  { id: "vc41", cat: "Veg Curries", name: "Paneer Chatpata Masala", price: 240 },
+  { id: "vc42", cat: "Veg Curries", name: "Veg Kurma", price: 250 },
+  { id: "vc43", cat: "Veg Curries", name: "Veg Tawa", price: 290 },
+  { id: "vc44", cat: "Veg Curries", name: "Veg Manchurian (Dry)", price: 130 },
+  { id: "vc45", cat: "Veg Curries", name: "Veg Chilly", price: 140 },
+  { id: "vc46", cat: "Veg Curries", name: "Veg Schezwan (Dry/Gravy)", price: 150 },
+  { id: "vc47", cat: "Veg Curries", name: "Veg Hong Kong", price: 170 },
+  { id: "vc48", cat: "Veg Curries", name: "Gobi Manchurian", price: 130 },
+  { id: "vc49", cat: "Veg Curries", name: "Paneer Chilly", price: 190 },
+  { id: "vc50", cat: "Veg Curries", name: "Paneer Schezwan", price: 190 },
+  { id: "vc51", cat: "Veg Curries", name: "Mushroom Chilli", price: 200 },
+
+  // NON-VEG CURRIES (Chicken / Egg / Mutton)
+  { id: "nc1", cat: "Non-Veg Curries", name: "Egg Bhurji", price: 80 },
+  { id: "nc2", cat: "Non-Veg Curries", name: "Egg Masala", price: 150 },
+  { id: "nc3", cat: "Non-Veg Curries", name: "Chicken Masala", price: 190 },
+  { id: "nc4", cat: "Non-Veg Curries", name: "Chicken Liver Pota Masala", price: 190 },
+  { id: "nc5", cat: "Non-Veg Curries", name: "Chicken Kadai", price: 240 },
+  { id: "nc6", cat: "Non-Veg Curries", name: "Chicken Do Payza", price: 230 },
+  { id: "nc7", cat: "Non-Veg Curries", name: "Chicken Tikka Masala (5pc)", price: 250 },
+  { id: "nc8", cat: "Non-Veg Curries", name: "Chicken Hydrabadi", price: 220 },
+  { id: "nc9", cat: "Non-Veg Curries", name: "Butter Chicken (Half)", price: 300 },
+  { id: "nc10", cat: "Non-Veg Curries", name: "Butter Chicken (Full)", price: 500 },
+  { id: "nc11", cat: "Non-Veg Curries", name: "Chicken Handi (Half)", price: 280 },
+  { id: "nc12", cat: "Non-Veg Curries", name: "Chicken Handi (Full)", price: 470 },
+  { id: "nc13", cat: "Non-Veg Curries", name: "Chicken Moghlai", price: 230 },
+  { id: "nc14", cat: "Non-Veg Curries", name: "Chicken Kolhapuri", price: 220 },
+  { id: "nc15", cat: "Non-Veg Curries", name: "Chicken Bhuna", price: 270 },
+  { id: "nc16", cat: "Non-Veg Curries", name: "Chicken Agri", price: 300 },
+  { id: "nc17", cat: "Non-Veg Curries", name: "Chicken Murg (Half)", price: 340 },
+  { id: "nc18", cat: "Non-Veg Curries", name: "Chicken Murg (Full)", price: 560 },
+  { id: "nc19", cat: "Non-Veg Curries", name: "Chicken Sukha", price: 220 },
+  { id: "nc20", cat: "Non-Veg Curries", name: "Chicken Malvani (Half)", price: 340 },
+  { id: "nc21", cat: "Non-Veg Curries", name: "Chicken Malvani (Full)", price: 590 },
+  { id: "nc22", cat: "Non-Veg Curries", name: "Chicken Patiyala", price: 340 },
+  { id: "nc23", cat: "Non-Veg Curries", name: "Chicken Sahil Special", price: 400 },
+  { id: "nc24", cat: "Non-Veg Curries", name: "Chicken Maharaja", price: 270 },
+  { id: "nc25", cat: "Non-Veg Curries", name: "Chicken Kabali", price: 310 },
+  { id: "nc26", cat: "Non-Veg Curries", name: "Chicken Rasila", price: 280 },
+  { id: "nc27", cat: "Non-Veg Curries", name: "Chicken Angara", price: 280 },
+  { id: "nc28", cat: "Non-Veg Curries", name: "Chicken Chatpata Masala", price: 280 },
+  { id: "nc29", cat: "Non-Veg Curries", name: "Mutton Masala", price: 320 },
+  { id: "nc30", cat: "Non-Veg Curries", name: "Mutton Masala Fry", price: 340 },
+  { id: "nc31", cat: "Non-Veg Curries", name: "Mutton Kadai", price: 390 },
+  { id: "nc32", cat: "Non-Veg Curries", name: "Mutton Moghlai", price: 340 },
+  { id: "nc33", cat: "Non-Veg Curries", name: "Mutton Handi (Half)", price: 420 },
+  { id: "nc34", cat: "Non-Veg Curries", name: "Mutton Handi (Full)", price: 670 },
+  { id: "nc35", cat: "Non-Veg Curries", name: "Mutton Rogan Josh", price: 390 },
+  { id: "nc36", cat: "Non-Veg Curries", name: "Mutton Sukha", price: 370 },
+  { id: "nc37", cat: "Non-Veg Curries", name: "Mutton Kheema Masala", price: 390 },
+  { id: "nc38", cat: "Non-Veg Curries", name: "Mutton Bhuna", price: 410 },
+  { id: "nc39", cat: "Non-Veg Curries", name: "Mutton Sahil Special", price: 640 },
+
+  // VEG RICE, BIRYANI & CHINESE VEG
+  { id: "vr1", cat: "Veg Rice & Chinese", name: "Steamed Rice", price: 70 },
+  { id: "vr2", cat: "Veg Rice & Chinese", name: "Jeera Rice", price: 90 },
+  { id: "vr3", cat: "Veg Rice & Chinese", name: "Veg Pulav", price: 140 },
+  { id: "vr4", cat: "Veg Rice & Chinese", name: "Veg Biryani", price: 150 },
+  { id: "vr5", cat: "Veg Rice & Chinese", name: "Veg Hydrabadi Biryani", price: 160 },
+  { id: "vr6", cat: "Veg Rice & Chinese", name: "Dal Khichadi", price: 160 },
+  { id: "vr7", cat: "Veg Rice & Chinese", name: "Veg Thali", price: 120 },
+  { id: "vr8", cat: "Veg Rice & Chinese", name: "Curd Rice", price: 160 },
+  { id: "vr9", cat: "Veg Rice & Chinese", name: "Veg Fried Rice (Half)", price: 85 },
+  { id: "vr10", cat: "Veg Rice & Chinese", name: "Veg Fried Rice (Full)", price: 130 },
+  { id: "vr11", cat: "Veg Rice & Chinese", name: "Veg Schezwan Rice (Half)", price: 90 },
+  { id: "vr12", cat: "Veg Rice & Chinese", name: "Veg Schezwan Rice (Full)", price: 140 },
+  { id: "vr13", cat: "Veg Rice & Chinese", name: "Veg Hong Kong Rice", price: 160 },
+  { id: "vr14", cat: "Veg Rice & Chinese", name: "Veg Singapore Rice", price: 150 },
+  { id: "vr15", cat: "Veg Rice & Chinese", name: "Veg Combination Rice", price: 150 },
+  { id: "vr16", cat: "Veg Rice & Chinese", name: "Veg Manchurian Rice (Half)", price: 130 },
+  { id: "vr17", cat: "Veg Rice & Chinese", name: "Veg Manchurian Rice (Full)", price: 190 },
+  { id: "vr18", cat: "Veg Rice & Chinese", name: "Veg Triple Schezwan Rice (Half)", price: 140 },
+  { id: "vr19", cat: "Veg Rice & Chinese", name: "Veg Triple Schezwan Rice (Full)", price: 200 },
+  { id: "vr20", cat: "Veg Rice & Chinese", name: "Veg Hakka Noodles (Half)", price: 85 },
+  { id: "vr21", cat: "Veg Rice & Chinese", name: "Veg Hakka Noodles (Full)", price: 140 },
+  { id: "vr22", cat: "Veg Rice & Chinese", name: "Veg Schezwan Noodles (Half)", price: 90 },
+  { id: "vr23", cat: "Veg Rice & Chinese", name: "Veg Schezwan Noodles (Full)", price: 150 },
+  { id: "vr24", cat: "Veg Rice & Chinese", name: "Veg Hong Kong Noodles", price: 170 },
+  { id: "vr25", cat: "Veg Rice & Chinese", name: "Veg Singapore Noodles", price: 160 },
+  { id: "vr26", cat: "Veg Rice & Chinese", name: "Veg Manchurian Noodles (Half)", price: 130 },
+  { id: "vr27", cat: "Veg Rice & Chinese", name: "Veg Manchurian Noodles (Full)", price: 190 },
+  { id: "vr28", cat: "Veg Rice & Chinese", name: "Veg Triple Schezwan Noodles (Half)", price: 140 },
+  { id: "vr29", cat: "Veg Rice & Chinese", name: "Veg Triple Schezwan Noodles (Full)", price: 200 },
+  { id: "vr30", cat: "Veg Rice & Chinese", name: "Veg Chowmein Noodles", price: 190 },
+  { id: "vr31", cat: "Veg Rice & Chinese", name: "Veg American Chopsy", price: 210 },
+
+  // NON-VEG BIRYANI & THALI
+  { id: "nb1", cat: "Non-Veg Biryani & Thali", name: "Egg Biryani", price: 150 },
+  { id: "nb2", cat: "Non-Veg Biryani & Thali", name: "Omelette", price: 45 },
+  { id: "nb3", cat: "Non-Veg Biryani & Thali", name: "Boiled Egg", price: 35 },
+  { id: "nb4", cat: "Non-Veg Biryani & Thali", name: "Chicken Biryani", price: 180 },
+  { id: "nb5", cat: "Non-Veg Biryani & Thali", name: "Chicken Hydrabadi Biryani", price: 190 },
+  { id: "nb6", cat: "Non-Veg Biryani & Thali", name: "Mutton Biryani", price: 350 },
+  { id: "nb7", cat: "Non-Veg Biryani & Thali", name: "Prawns Biryani", price: 280 },
+  { id: "nb8", cat: "Non-Veg Biryani & Thali", name: "Chicken Pulav", price: 200 },
+  { id: "nb9", cat: "Non-Veg Biryani & Thali", name: "Chicken Thali", price: 190 },
+  { id: "nb10", cat: "Non-Veg Biryani & Thali", name: "Mutton Thali", price: 300 },
+  { id: "nb11", cat: "Non-Veg Biryani & Thali", name: "Fish Thali", price: null },
+  { id: "nb12", cat: "Non-Veg Biryani & Thali", name: "Egg Thali", price: 150 },
+  { id: "nb13", cat: "Non-Veg Biryani & Thali", name: "Sahil Special Thali", price: 200 },
+
+  // SEA FOOD
+  { id: "sf1", cat: "Sea Food", name: "Prawns Masala", price: 250 },
+  { id: "sf2", cat: "Sea Food", name: "Prawns Koliwada", price: 250 },
+  { id: "sf3", cat: "Sea Food", name: "Pomfret Masala", price: null },
+  { id: "sf4", cat: "Sea Food", name: "Bangda Masala", price: 140 },
+  { id: "sf5", cat: "Sea Food", name: "Bangda Fry", price: 100 },
+  { id: "sf6", cat: "Sea Food", name: "Pomfret Tawa Fry", price: null },
+  { id: "sf7", cat: "Sea Food", name: "Chicken Tandoori Lollypop", price: 250 },
+  { id: "sf8", cat: "Sea Food", name: "Pomfret Tandoori", price: null },
+  { id: "sf9", cat: "Sea Food", name: "Bangda Tandoori", price: null },
+  { id: "sf10", cat: "Sea Food", name: "Prawns Tandoori", price: null },
+  { id: "sf11", cat: "Sea Food", name: "Bengali Fish Masala", price: null },
+
+  // CHINESE NON-VEG
+  { id: "cn1", cat: "Chinese Non-Veg", name: "Egg Fried Rice (Half)", price: 90 },
+  { id: "cn2", cat: "Chinese Non-Veg", name: "Egg Fried Rice (Full)", price: 140 },
+  { id: "cn3", cat: "Chinese Non-Veg", name: "Egg Schezwan Rice (Half)", price: 95 },
+  { id: "cn4", cat: "Chinese Non-Veg", name: "Egg Schezwan Rice (Full)", price: 150 },
+  { id: "cn5", cat: "Chinese Non-Veg", name: "Chicken Fried Rice (Half)", price: 100 },
+  { id: "cn6", cat: "Chinese Non-Veg", name: "Chicken Fried Rice (Full)", price: 170 },
+  { id: "cn7", cat: "Chinese Non-Veg", name: "Chicken Schezwan Rice (Half)", price: 110 },
+  { id: "cn8", cat: "Chinese Non-Veg", name: "Chicken Schezwan Rice (Full)", price: 180 },
+  { id: "cn9", cat: "Chinese Non-Veg", name: "Chicken Singapore Rice", price: 190 },
+  { id: "cn10", cat: "Chinese Non-Veg", name: "Chicken Hong Kong Rice", price: 210 },
+  { id: "cn11", cat: "Chinese Non-Veg", name: "Chicken Combination Rice", price: 180 },
+  { id: "cn12", cat: "Chinese Non-Veg", name: "Chicken Manchurian Rice (Half)", price: 150 },
+  { id: "cn13", cat: "Chinese Non-Veg", name: "Chicken Manchurian Rice (Full)", price: 230 },
+  { id: "cn14", cat: "Chinese Non-Veg", name: "Chicken Triple Schezwan Rice (Half)", price: 160 },
+  { id: "cn15", cat: "Chinese Non-Veg", name: "Chicken Triple Schezwan Rice (Full)", price: 240 },
+  { id: "cn16", cat: "Chinese Non-Veg", name: "Fish Chilly", price: null },
+  { id: "cn17", cat: "Chinese Non-Veg", name: "Prawns Butter Garlic", price: null },
+  { id: "cn18", cat: "Chinese Non-Veg", name: "Mix Fried Rice", price: 250 },
+  { id: "cn19", cat: "Chinese Non-Veg", name: "Egg Hakka Noodles (Half)", price: 90 },
+  { id: "cn20", cat: "Chinese Non-Veg", name: "Egg Hakka Noodles (Full)", price: 150 },
+  { id: "cn21", cat: "Chinese Non-Veg", name: "Egg Schezwan Noodles (Half)", price: 95 },
+  { id: "cn22", cat: "Chinese Non-Veg", name: "Egg Schezwan Noodles (Full)", price: 160 },
+  { id: "cn23", cat: "Chinese Non-Veg", name: "Chicken Hakka Noodles (Half)", price: 100 },
+  { id: "cn24", cat: "Chinese Non-Veg", name: "Chicken Hakka Noodles (Full)", price: 180 },
+  { id: "cn25", cat: "Chinese Non-Veg", name: "Chicken Schezwan Noodles (Half)", price: 110 },
+  { id: "cn26", cat: "Chinese Non-Veg", name: "Chicken Schezwan Noodles (Full)", price: 190 },
+  { id: "cn27", cat: "Chinese Non-Veg", name: "Chicken Singapore Noodles", price: 220 },
+  { id: "cn28", cat: "Chinese Non-Veg", name: "Chicken Hong Kong Noodles", price: 210 },
+  { id: "cn29", cat: "Chinese Non-Veg", name: "Chicken Manchurian Noodles (Half)", price: 150 },
+  { id: "cn30", cat: "Chinese Non-Veg", name: "Chicken Manchurian Noodles (Full)", price: 230 },
+  { id: "cn31", cat: "Chinese Non-Veg", name: "Chicken American Chopsy", price: 220 },
+  { id: "cn32", cat: "Chinese Non-Veg", name: "Chicken Triple Noodles (Half)", price: 160 },
+  { id: "cn33", cat: "Chinese Non-Veg", name: "Chicken Triple Noodles (Full)", price: 250 },
+  { id: "cn34", cat: "Chinese Non-Veg", name: "Chicken Sangai Noodles", price: 270 },
+  { id: "cn35", cat: "Chinese Non-Veg", name: "Chicken Garlic Noodles", price: 200 },
+  { id: "cn36", cat: "Chinese Non-Veg", name: "Chicken Manchurian (Dry)", price: 190 },
+  { id: "cn37", cat: "Chinese Non-Veg", name: "Chicken Chilly", price: 200 },
+  { id: "cn38", cat: "Chinese Non-Veg", name: "Chicken Schezwan (Dry)", price: 220 },
+  { id: "cn39", cat: "Chinese Non-Veg", name: "Chicken Hong Kong (Dry)", price: 250 },
+  { id: "cn40", cat: "Chinese Non-Veg", name: "Chicken '65'", price: 210 },
+  { id: "cn41", cat: "Chinese Non-Veg", name: "Prawns Schezwan", price: 280 },
+  { id: "cn42", cat: "Chinese Non-Veg", name: "Chicken Salt & Pepper", price: 330 },
+  { id: "cn43", cat: "Chinese Non-Veg", name: "Chicken Black Pepper", price: 330 },
+  { id: "cn44", cat: "Chinese Non-Veg", name: "Chicken Wester Sauce", price: 330 },
+  { id: "cn45", cat: "Chinese Non-Veg", name: "Chicken Black Bean Sauce", price: 370 },
+  { id: "cn46", cat: "Chinese Non-Veg", name: "Chicken Lamba", price: 380 },
+  { id: "cn47", cat: "Chinese Non-Veg", name: "Prawns Chilly", price: 270 },
+
+  // KABAB & TANDOORI
+  { id: "kt1", cat: "Kabab & Tandoori", name: "Tandoori Mushroom", price: 250 },
+  { id: "kt2", cat: "Kabab & Tandoori", name: "Tandoori Baby Corn", price: 260 },
+  { id: "kt3", cat: "Kabab & Tandoori", name: "Tandoori Gobi Corn", price: 280 },
+  { id: "kt4", cat: "Kabab & Tandoori", name: "Paneer Tikka Dry", price: 250 },
+  { id: "kt5", cat: "Kabab & Tandoori", name: "Paneer Pahadi Kabab", price: 260 },
+  { id: "kt6", cat: "Kabab & Tandoori", name: "Paneer Banjara Kabab", price: 270 },
+  { id: "kt7", cat: "Kabab & Tandoori", name: "Paneer Sholay Kabab", price: 290 },
+  { id: "kt8", cat: "Kabab & Tandoori", name: "Paneer Reshmi Kabab", price: 270 },
+  { id: "kt9", cat: "Kabab & Tandoori", name: "Veg Seekh Kabab", price: 270 },
+  { id: "kt10", cat: "Kabab & Tandoori", name: "Paneer Kalimiri", price: 270 },
+  { id: "kt11", cat: "Kabab & Tandoori", name: "Sahil Special Kabab (Veg)", price: 370 },
+  { id: "kt12", cat: "Kabab & Tandoori", name: "Chicken Seekh Kabab", price: 270 },
+  { id: "kt13", cat: "Kabab & Tandoori", name: "Chicken Tikka", price: 250 },
+  { id: "kt14", cat: "Kabab & Tandoori", name: "Chicken Pahadi Kabab", price: 270 },
+  { id: "kt15", cat: "Kabab & Tandoori", name: "Chicken Reshmi Kabab", price: 280 },
+  { id: "kt16", cat: "Kabab & Tandoori", name: "Chicken Sholay Kabab", price: 290 },
+  { id: "kt17", cat: "Kabab & Tandoori", name: "Chicken Pudina Tikka", price: 310 },
+  { id: "kt18", cat: "Kabab & Tandoori", name: "Chicken Lasuni Tikka", price: 300 },
+  { id: "kt19", cat: "Kabab & Tandoori", name: "Chicken Adraki Kabab", price: 330 },
+  { id: "kt20", cat: "Kabab & Tandoori", name: "Chicken Surely Kabab", price: 290 },
+  { id: "kt21", cat: "Kabab & Tandoori", name: "Chicken Tangadi", price: 350 },
+  { id: "kt22", cat: "Kabab & Tandoori", name: "Chicken Malai Tikka", price: 300 },
+  { id: "kt23", cat: "Kabab & Tandoori", name: "Chicken Tandoori (Half)", price: 210 },
+  { id: "kt24", cat: "Kabab & Tandoori", name: "Chicken Tandoori (Full)", price: 360 },
+  { id: "kt25", cat: "Kabab & Tandoori", name: "Chicken Afgani Kabab", price: 390 },
+  { id: "kt26", cat: "Kabab & Tandoori", name: "Chicken Sahil Special Kabab", price: 390 },
+  { id: "kt27", cat: "Kabab & Tandoori", name: "White Tandoori", price: 400 },
+  { id: "kt28", cat: "Kabab & Tandoori", name: "Pudina Tandoori", price: 400 },
+
+  // ROTI NAAN PARATHA
+  { id: "rn1", cat: "Roti & Naan", name: "Chapati", price: 10 },
+  { id: "rn2", cat: "Roti & Naan", name: "Roti", price: 16 },
+  { id: "rn3", cat: "Roti & Naan", name: "Masala Papad", price: 30 },
+  { id: "rn4", cat: "Roti & Naan", name: "Missi Roti", price: 40 },
+  { id: "rn5", cat: "Roti & Naan", name: "Paratha", price: 25 },
+  { id: "rn6", cat: "Roti & Naan", name: "Naan", price: 30 },
+  { id: "rn7", cat: "Roti & Naan", name: "Kulcha", price: 20 },
+  { id: "rn8", cat: "Roti & Naan", name: "Puri", price: 15 },
+  { id: "rn9", cat: "Roti & Naan", name: "Garlic Kulcha", price: 25 },
+  { id: "rn10", cat: "Roti & Naan", name: "Rice Bhakri", price: 40 },
+  { id: "rn11", cat: "Roti & Naan", name: "Stuffed Paratha", price: 22 },
+  { id: "rn12", cat: "Roti & Naan", name: "Lachha Paratha", price: 80 },
+  { id: "rn13", cat: "Roti & Naan", name: "Aloo Paratha", price: 35 },
+  { id: "rn14", cat: "Roti & Naan", name: "Paneer Paratha", price: 60 },
+  { id: "rn15", cat: "Roti & Naan", name: "Gobi Paratha", price: 80 },
+  { id: "rn16", cat: "Roti & Naan", name: "Kashta Roti", price: 70 },
+
+  // DRINKS
+  { id: "dr1", cat: "Drinks", name: "Mineral Water 1L", price: 20 },
+  { id: "dr2", cat: "Drinks", name: "Cold Drink 750ml", price: 45 },
+  { id: "dr3", cat: "Drinks", name: "Cold Drink 300ml", price: 20 },
+];
+
+const CATS = [...new Set(MENU.map((m) => m.cat))];
+const todayKey = () => new Date().toISOString().slice(0, 10);
+
+const RESTAURANT_NAME = "Hotel Sahil";
+const RESTAURANT_ADDRESS =
+  "Bhoomi Colossa, Shop No. 22, Sector 19, Airoli, Navi Mumbai - 400708";
+const RESTAURANT_PHONE = "9819718710";
+
+const C = {
+  cream: "#FFF7EC",
+  card: "#FFFFFF",
+  border: "#F0D6B4",
+  maroon: "#8B2E1F",
+  darkText: "#4A2318",
+  mutedText: "#9C6B4F",
+  amber: "#E8A33D",
+  green: "#3F7A52",
+  addGreen: "#16A34A",
+  tabBg: "#F5E3C8",
+  white: "#FFFFFF",
+};
+
+function App() {
+  const [view, setView] = useState("bill");
+  const [activeCat, setActiveCat] = useState(CATS[0]);
+  const [bill, setBill] = useState({});
+  const [customPrices, setCustomPrices] = useState({});
+  const [orders, setOrders] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [customers, setCustomers] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [payModal, setPayModal] = useState(false);
+  const [lastOrder, setLastOrder] = useState(null);
+  const [phone, setPhone] = useState("");
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [expenseDesc, setExpenseDesc] = useState("");
+  const [expenseAmt, setExpenseAmt] = useState("");
+  const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [o, e, c] = await Promise.all([
+          window.storage.get("hotel-sahil-orders").catch(() => null),
+          window.storage.get("hotel-sahil-expenses").catch(() => null),
+          window.storage.get("hotel-sahil-customers").catch(() => null),
+        ]);
+        if (o && o.value) setOrders(JSON.parse(o.value));
+        if (e && e.value) setExpenses(JSON.parse(e.value));
+        if (c && c.value) setCustomers(JSON.parse(c.value));
+      } catch (e) {}
+      setLoading(false);
+    })();
+  }, []);
+
+  const flash = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(""), 1800);
+  };
+
+  const saveOrders = async (next) => {
+    setOrders(next);
+    try {
+      await window.storage.set("hotel-sahil-orders", JSON.stringify(next));
+    } catch (e) {
+      setError("Could not save order data — it may not persist.");
+    }
+  };
+
+  const saveExpenses = async (next) => {
+    setExpenses(next);
+    try {
+      await window.storage.set("hotel-sahil-expenses", JSON.stringify(next));
+    } catch (e) {
+      setError("Could not save expense data — it may not persist.");
+    }
+  };
+
+  const saveCustomers = async (next) => {
+    setCustomers(next);
+    try {
+      await window.storage.set("hotel-sahil-customers", JSON.stringify(next));
+    } catch (e) {
+      setError("Could not save customer data — it may not persist.");
+    }
+  };
+
+  const add = (item) => {
+    if (item.price === null && customPrices[item.id] == null) {
+      const entered = window.prompt(`Enter today's price for ${item.name} (₹)`);
+      const val = parseFloat(entered);
+      if (!entered || isNaN(val) || val <= 0) return;
+      setCustomPrices((p) => ({ ...p, [item.id]: val }));
+    }
+    setBill((b) => ({ ...b, [item.id]: (b[item.id] || 0) + 1 }));
+  };
+  const remove = (id) =>
+    setBill((b) => {
+      const n = { ...b };
+      if (n[id] > 1) n[id] -= 1;
+      else delete n[id];
+      return n;
+    });
+
+  const removeAll = (id) =>
+    setBill((b) => {
+      const n = { ...b };
+      delete n[id];
+      return n;
+    });
+
+  const clearBill = () => {
+    if (Object.keys(bill).length === 0) return;
+    if (window.confirm("Clear the current bill?")) setBill({});
+  };
+
+  const items = useMemo(
+    () =>
+      Object.entries(bill)
+        .map(([id, qty]) => {
+          const m = MENU.find((x) => x.id === id);
+          if (!m) return null;
+          return { ...m, qty, price: customPrices[id] ?? m.price };
+        })
+        .filter(Boolean),
+    [bill, customPrices]
+  );
+  const total = items.reduce((s, i) => s + i.price * i.qty, 0);
+  const count = items.reduce((s, i) => s + i.qty, 0);
+
+  const finalizeOrder = async (method) => {
+    const order = {
+      id: Date.now(),
+      date: todayKey(),
+      time: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+      items,
+      total,
+      count,
+      method,
+    };
+    await saveOrders([...orders, order]);
+    setLastOrder(order);
+    setPayModal(false);
+    setBill({});
+  };
+
+  const addExpense = async () => {
+    const val = parseFloat(expenseAmt);
+    if (!expenseDesc.trim() || isNaN(val) || val <= 0) {
+      flash("Enter a description and a valid amount");
+      return;
+    }
+    const exp = {
+      id: Date.now(),
+      date: todayKey(),
+      time: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+      desc: expenseDesc.trim(),
+      amount: val,
+    };
+    await saveExpenses([...expenses, exp]);
+    setExpenseDesc("");
+    setExpenseAmt("");
+    flash("Expense added");
+  };
+
+  const deleteExpense = async (id) => {
+    await saveExpenses(expenses.filter((e) => e.id !== id));
+  };
+
+  const today = orders.filter((o) => o.date === todayKey());
+  const todaySales = today.reduce((s, o) => s + o.total, 0);
+  const todayItemsSold = today.reduce((s, o) => s + o.count, 0);
+  const todayExpenses = expenses.filter((e) => e.date === todayKey());
+  const todayExpenseTotal = todayExpenses.reduce((s, e) => s + e.amount, 0);
+  const todayNet = todaySales - todayExpenseTotal;
+
+  const billText = (order) => {
+    const lines = order.items.map((i) => `${i.qty}x ${i.name} - ₹${i.price * i.qty}`).join("\n");
+    return `🧾 ${RESTAURANT_NAME}\n${RESTAURANT_ADDRESS}\nOrders/Calls: ${RESTAURANT_PHONE}\n\nDate: ${order.date} ${order.time}\n\n${lines}\n\nTotal: ₹${order.total}\nPayment: ${order.method}\n\nThank you, visit again! 🙏`;
+  };
+
+  const saveCustomerRecord = async (phoneNum, order) => {
+    const clean = phoneNum.replace(/\D/g, "");
+    if (!clean) return;
+    const next = { ...customers };
+    const existing = next[clean] || { phone: clean, orderCount: 0, totalSpent: 0, firstSeen: order.date };
+    next[clean] = {
+      ...existing,
+      phone: clean,
+      orderCount: existing.orderCount + 1,
+      totalSpent: existing.totalSpent + order.total,
+      lastOrder: order.date,
+    };
+    await saveCustomers(next);
+  };
+
+  const sendWhatsApp = (order) => {
+    const text = encodeURIComponent(billText(order));
+    if (phone.trim()) {
+      saveCustomerRecord(phone, order);
+    }
+    const url = phone.trim()
+      ? `https://wa.me/${phone.replace(/\D/g, "")}?text=${text}`
+      : `https://api.whatsapp.com/send?text=${text}`;
+    window.open(url, "_blank");
+  };
+
+  const clearData = async () => {
+    if (window.confirm("Clear all saved order & expense history? This can't be undone.")) {
+      await saveOrders([]);
+      await saveExpenses([]);
+    }
+  };
+
+  const visibleItems = search.trim()
+    ? MENU.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()))
+    : MENU.filter((m) => m.cat === activeCat);
+
+  const customerList = Object.values(customers).sort((a, b) => b.totalSpent - a.totalSpent);
+
+  if (loading) {
+    return (
+      <div style={{ background: C.cream, color: C.darkText }} className="min-h-screen flex items-center justify-center">
+        <p className="text-sm" style={{ color: C.mutedText }}>Loading Hotel Sahil…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: C.cream, color: C.darkText }} className="h-screen flex flex-col font-sans relative overflow-hidden">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap');
+        .display { font-family: 'Playfair Display', serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .body-f { font-family: 'Inter', sans-serif; }
+      `}</style>
+
+      <header style={{ background: C.cream, borderBottom: `2px solid ${C.border}` }} className="shrink-0 px-5 py-3 shadow-sm z-10">
+        <div className="max-w-md mx-auto">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="display text-xl font-black leading-tight truncate" style={{ color: C.maroon }}>{RESTAURANT_NAME}</h1>
+              <p className="body-f text-[9px] leading-snug truncate" style={{ color: C.mutedText }}>{RESTAURANT_ADDRESS}</p>
+            </div>
+            <a
+              href={`tel:${RESTAURANT_PHONE}`}
+              style={{ background: C.green, color: C.white }}
+              className="mono text-[11px] px-3 py-2 rounded-md font-semibold whitespace-nowrap shadow-sm active:scale-95 transition-transform shrink-0"
+            >
+              📞 CALL
+            </a>
+          </div>
+          <div style={{ background: C.tabBg }} className="flex gap-1 rounded-md p-1 mt-2">
+            <button
+              onClick={() => setView("bill")}
+              style={view === "bill" ? { background: C.amber, color: C.white } : { color: C.mutedText }}
+              className="mono text-xs px-3 py-1.5 rounded-md flex-1 font-semibold transition-colors"
+            >
+              NEW BILL
+            </button>
+            <button
+              onClick={() => setView("summary")}
+              style={view === "summary" ? { background: C.amber, color: C.white } : { color: C.mutedText }}
+              className="mono text-xs px-3 py-1.5 rounded-md flex-1 font-semibold transition-colors"
+            >
+              TODAY
+            </button>
+            <button
+              onClick={() => setView("customers")}
+              style={view === "customers" ? { background: C.amber, color: C.white } : { color: C.mutedText }}
+              className="mono text-xs px-3 py-1.5 rounded-md flex-1 font-semibold transition-colors"
+            >
+              CUSTOMERS
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto min-h-0">
+      {error && <div style={{ background: C.maroon, color: C.white }} className="text-xs px-5 py-2">{error}</div>}
+
+      {view === "summary" && (
+        <div className="max-w-md mx-auto px-5 py-6 space-y-5">
+          <p className="mono text-xs uppercase tracking-widest" style={{ color: C.mutedText }}>{todayKey()}</p>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Stat label="Sales" value={`₹${todaySales}`} color={C.green} />
+            <Stat label="Expenses" value={`₹${todayExpenseTotal}`} color={C.maroon} />
+            <Stat label="Net" value={`₹${todayNet}`} color={todayNet >= 0 ? C.green : C.maroon} />
+            <Stat label="Items Sold" value={todayItemsSold} color={C.amber} />
+          </div>
+
+          <div style={{ background: C.card, border: `1px solid ${C.border}` }} className="rounded-lg p-4">
+            <p className="mono text-xs uppercase tracking-widest mb-3" style={{ color: C.mutedText }}>Add today's expense</p>
+            <div className="flex gap-2 mb-2">
+              <input
+                value={expenseDesc}
+                onChange={(e) => setExpenseDesc(e.target.value)}
+                placeholder="e.g. Vegetables, Gas cylinder"
+                style={{ background: C.cream, border: `1px solid ${C.border}` }}
+                className="flex-1 rounded-md px-3 py-2 body-f text-sm"
+              />
+              <input
+                value={expenseAmt}
+                onChange={(e) => setExpenseAmt(e.target.value)}
+                placeholder="₹"
+                inputMode="decimal"
+                style={{ background: C.cream, border: `1px solid ${C.border}` }}
+                className="w-20 rounded-md px-3 py-2 body-f text-sm"
+              />
+            </div>
+            <button
+              onClick={addExpense}
+              style={{ background: C.maroon, color: C.white }}
+              className="w-full py-2 rounded-md mono text-xs font-semibold active:scale-[0.98] transition-transform"
+            >
+              ADD EXPENSE
+            </button>
+          </div>
+
+          {todayExpenses.length > 0 && (
+            <div>
+              <p className="mono text-xs uppercase tracking-widest mb-2" style={{ color: C.mutedText }}>Today's expenses</p>
+              <div className="space-y-2">
+                {todayExpenses.slice().reverse().map((e) => (
+                  <div key={e.id} style={{ background: C.card, border: `1px solid ${C.border}` }} className="rounded-md p-3 flex items-center justify-between">
+                    <div>
+                      <p className="body-f text-sm">{e.desc}</p>
+                      <p className="mono text-[10px]" style={{ color: C.mutedText }}>{e.time}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <p className="mono text-sm font-semibold" style={{ color: C.maroon }}>₹{e.amount}</p>
+                      <button onClick={() => deleteExpense(e.id)} className="text-xs" style={{ color: C.mutedText }}>✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ borderTop: `1px solid ${C.border}` }} className="pt-4">
+            <p className="mono text-xs uppercase tracking-widest mb-3" style={{ color: C.mutedText }}>Orders today</p>
+            {today.length === 0 && <p className="body-f text-sm" style={{ color: C.mutedText }}>No orders yet today.</p>}
+            <div className="space-y-2">
+              {today.slice().reverse().map((o) => (
+                <div key={o.id} style={{ background: C.card, border: `1px solid ${C.border}` }} className="rounded-md p-3 flex items-center justify-between">
+                  <div>
+                    <p className="body-f text-sm">{o.time} · {o.count} items</p>
+                    <p className="mono text-xs" style={{ color: C.mutedText }}>{o.method}</p>
+                  </div>
+                  <p className="mono text-sm font-semibold" style={{ color: C.amber }}>₹{o.total}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+          {(orders.length > 0 || expenses.length > 0) && (
+            <button onClick={clearData} className="mono text-xs underline pt-2" style={{ color: C.mutedText }}>
+              Clear all data
+            </button>
+          )}
+        </div>
+      )}
+
+      {view === "customers" && (
+        <div className="max-w-md mx-auto px-5 py-6 space-y-3">
+          <p className="mono text-xs uppercase tracking-widest" style={{ color: C.mutedText }}>
+            Saved customers ({customerList.length})
+          </p>
+          {customerList.length === 0 && (
+            <p className="body-f text-sm py-4" style={{ color: C.mutedText }}>
+              No customer numbers saved yet. When you send a bill via WhatsApp with a number entered, it's saved here automatically.
+            </p>
+          )}
+          <div className="space-y-2">
+            {customerList.map((c) => (
+              <div key={c.phone} style={{ background: C.card, border: `1px solid ${C.border}` }} className="rounded-md p-3 flex items-center justify-between">
+                <div>
+                  <p className="body-f text-sm font-semibold">{c.phone}</p>
+                  <p className="mono text-[10px]" style={{ color: C.mutedText }}>
+                    {c.orderCount} order{c.orderCount > 1 ? "s" : ""} · last {c.lastOrder}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <p className="mono text-sm font-semibold" style={{ color: C.green }}>₹{c.totalSpent}</p>
+                  <a
+                    href={`https://wa.me/${c.phone}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ background: C.green, color: C.white }}
+                    className="text-xs mono px-2 py-1 rounded"
+                  >
+                    Chat
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {view === "bill" && (
+        <div className="max-w-md mx-auto">
+          <div className="px-5 pt-4">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="🔍 Search dish..."
+              style={{ background: C.card, border: `1px solid ${C.border}` }}
+              className="w-full rounded-md px-3 py-2.5 body-f text-sm mb-3 shadow-sm"
+            />
+          </div>
+          {!search.trim() && (
+            <div className="flex gap-2 px-5 pb-2 overflow-x-auto">
+              {CATS.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setActiveCat(c)}
+                  style={
+                    activeCat === c
+                      ? { background: C.maroon, color: C.white, border: `1px solid ${C.maroon}` }
+                      : { background: C.card, color: C.mutedText, border: `1px solid ${C.border}` }
+                  }
+                  className="mono text-xs px-3 py-1.5 rounded-md whitespace-nowrap transition-colors"
+                >
+                  {c.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="px-5 py-2 space-y-2">
+            {visibleItems.map((m) => (
+              <div key={m.id} style={{ background: C.card, border: `1px solid ${C.border}` }} className="flex items-center justify-between gap-3 rounded-md px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="body-f font-semibold text-sm truncate">{m.name}</p>
+                  <p className="mono text-xs font-semibold" style={{ color: C.amber }}>
+                    {m.price === null
+                      ? customPrices[m.id] != null
+                        ? `₹${customPrices[m.id]}`
+                        : "APS — tap Add"
+                      : `₹${m.price}`}
+                  </p>
+                </div>
+                <div className="shrink-0">
+                  <QtyControl qty={bill[m.id] || 0} onAdd={() => add(m)} onRemove={() => remove(m.id)} onRemoveAll={() => removeAll(m.id)} />
+                </div>
+              </div>
+            ))}
+            {visibleItems.length === 0 && (
+              <p className="body-f text-sm py-4" style={{ color: C.mutedText }}>No dish matches "{search}".</p>
+            )}
+          </div>
+
+          {count > 0 && (
+            <div className="sticky bottom-0 pb-4 pt-2 px-4 z-20" style={{ background: `linear-gradient(to top, ${C.cream}, ${C.cream} 60%, transparent)` }}>
+              <div style={{ background: C.card, border: `1px solid ${C.border}` }} className="rounded-lg shadow-2xl">
+                <div style={{ borderBottom: `1px dashed ${C.border}` }} className="px-4 pt-3 pb-2 flex items-center justify-between">
+                  <span className="mono text-xs uppercase tracking-wider" style={{ color: C.mutedText }}>Current bill</span>
+                  <div className="flex items-center gap-3">
+                    <span className="mono text-xs" style={{ color: C.mutedText }}>{count} items</span>
+                    <button onClick={clearBill} className="mono text-[10px] underline" style={{ color: C.maroon }}>clear all</button>
+                  </div>
+                </div>
+                <div className="px-4 py-2 max-h-28 overflow-y-auto">
+                  {items.map((i) => (
+                    <div key={i.id} className="mono text-xs py-1 flex items-center justify-between gap-2">
+                      <span className="truncate">{i.qty}× {i.name}</span>
+                      <span className="flex items-center gap-2 shrink-0">
+                        ₹{i.price * i.qty}
+                        <button
+                          onClick={() => removeAll(i.id)}
+                          aria-label={`Remove ${i.name}`}
+                          style={{ background: C.tabBg, color: C.maroon }}
+                          className="w-5 h-5 flex items-center justify-center rounded font-bold"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setPayModal(true)}
+                  style={{ background: C.amber, color: C.white }}
+                  className="w-full display font-bold text-sm py-4 rounded-b-lg active:scale-[0.99] transition-transform"
+                >
+                  COMPLETE ORDER · ₹{total}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      </div>
+
+      {payModal && (
+        <div className="absolute inset-0 flex items-end justify-center z-30" style={{ background: "rgba(0,0,0,0.5)" }}>
+          <div style={{ background: C.card, color: C.darkText }} className="max-w-md w-full rounded-t-lg p-5">
+            <p className="mono text-xs uppercase tracking-widest mb-4" style={{ color: C.mutedText }}>Select payment method</p>
+            <p className="mono text-2xl mb-4 font-bold">₹{total}</p>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <button onClick={() => finalizeOrder("Cash")} style={{ border: `2px solid ${C.maroon}`, color: C.maroon }} className="py-3 rounded-md mono text-sm font-semibold active:scale-95 transition-transform">
+                CASH
+              </button>
+              <button onClick={() => finalizeOrder("Online")} style={{ background: C.green, color: C.white }} className="py-3 rounded-md mono text-sm font-semibold active:scale-95 transition-transform">
+                ONLINE
+              </button>
+            </div>
+            <button onClick={() => setPayModal(false)} className="mono text-xs underline" style={{ color: C.mutedText }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {lastOrder && (
+        <div className="absolute inset-0 flex items-center justify-center z-30 px-5" style={{ background: "rgba(0,0,0,0.5)" }}>
+          <div style={{ background: C.card, color: C.darkText }} className="max-w-md w-full rounded-lg p-5 max-h-[90vh] overflow-y-auto">
+            <p className="mono text-xs uppercase tracking-widest mb-2" style={{ color: C.mutedText }}>Order complete — {lastOrder.method}</p>
+            <pre className="body-f text-xs whitespace-pre-wrap p-3 rounded-md mb-4" style={{ background: C.cream, border: `1px solid ${C.border}` }}>{billText(lastOrder)}</pre>
+            <label className="body-f text-xs block mb-1" style={{ color: C.mutedText }}>Customer WhatsApp number (optional — saves for future contact)</label>
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="e.g. 919876543210"
+              style={{ border: `1px solid ${C.border}`, background: C.white }}
+              className="w-full rounded-md px-3 py-2 mono text-sm mb-3"
+            />
+            <button onClick={() => sendWhatsApp(lastOrder)} style={{ background: C.green, color: C.white }} className="w-full py-3 rounded-md mono text-sm font-semibold mb-2 active:scale-[0.98] transition-transform">
+              SEND VIA WHATSAPP
+            </button>
+            <button onClick={() => { setLastOrder(null); setPhone(""); }} className="w-full py-2 mono text-xs underline" style={{ color: C.mutedText }}>
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div style={{ background: C.darkText, color: C.white }} className="absolute top-4 left-1/2 -translate-x-1/2 text-xs px-4 py-2 rounded-md shadow-lg z-40">
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value, color }) {
+  return (
+    <div style={{ background: "#FFFFFF", border: "1px solid #F0D6B4" }} className="rounded-lg p-3">
+      <p className="mono text-lg font-bold" style={{ color: color || "#E8A33D" }}>{value}</p>
+      <p className="body-f text-[10px] uppercase tracking-wide mt-1" style={{ color: "#9C6B4F" }}>{label}</p>
+    </div>
+  );
+}
+
+function QtyControl({ qty, onAdd, onRemove, onRemoveAll }) {
+  if (qty === 0) {
+    return (
+      <button
+        onClick={onAdd}
+        style={{ background: "#16A34A", color: "#FFFFFF" }}
+        className="mono text-xs px-4 py-2.5 rounded-md font-bold shadow-md active:scale-95 transition-transform whitespace-nowrap shrink-0"
+      >
+        ADD
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        onClick={onRemoveAll}
+        aria-label="Remove item"
+        title="Remove item"
+        style={{ background: "#F5E3C8", color: "#8B2E1F" }}
+        className="mono w-7 h-7 flex items-center justify-center rounded-md"
+      >
+        🗑
+      </button>
+      <button onClick={onRemove} style={{ border: "2px solid #16A34A", color: "#16A34A" }} className="mono w-7 h-7 flex items-center justify-center rounded-md font-bold">−</button>
+      <span className="mono text-sm w-5 text-center font-bold">{qty}</span>
+      <button onClick={onAdd} style={{ background: "#16A34A", color: "#FFFFFF" }} className="mono w-7 h-7 flex items-center justify-center rounded-md font-bold shadow-sm">+</button>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
